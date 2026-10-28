@@ -1,0 +1,9 @@
+.vs/
+build/
+out/
+*.obj
+*.exe
+*.dll
+*.ipch
+*.db
+*.sqlite
