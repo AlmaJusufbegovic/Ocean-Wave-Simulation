@@ -3,11 +3,16 @@
 #include <vector>
 #include <cmath>
 #include <utility>
+#include <algorithm>
 
 using cd = std::complex<float>;
 constexpr float PI = 3.14159265358979f;
 
-// In-place radix-2 FFT. a.size() mora biti stepen dvojke.
+// Globalni prekidac: true = OpenMP paralelizacija ukljucena, false = sekvencijalno.
+// (omogucava poredjenje obje verzije u ISTOM programu)
+inline bool gUseOmp = false;
+
+// In-place radix-2 FFT jedne linije. a.size() mora biti stepen dvojke.
 // inverse = true: inverzna transformacija, sa dijeljenjem sa N.
 inline void fft(std::vector<cd>& a, bool inverse) {
     const size_t n = a.size();
@@ -25,7 +30,7 @@ inline void fft(std::vector<cd>& a, bool inverse) {
         const float ang = 2.0f * PI / float(len) * (inverse ? 1.0f : -1.0f);
         for (size_t i = 0; i < n; i += len) {
             for (size_t k = 0; k < len / 2; ++k) {
-                cd w = std::polar(1.0f, ang * float(k));   // twiddle faktor
+                cd w = std::polar(1.0f, ang * float(k));
                 cd u = a[i + k];
                 cd v = a[i + k + len / 2] * w;
                 a[i + k] = u + v;
@@ -53,22 +58,29 @@ inline std::vector<cd> dft_naive(const std::vector<cd>& x) {
     return out;
 }
 
-// 2D FFT nad N x N mrezom (row-major). inverse = true: inverzna, sa dijeljenjem sa N^2.
-inline void fft2d(std::vector<cd>& a, size_t n, bool inverse) {
-    std::vector<cd> line(n);
+// 2D FFT nad nn x nn mrezom (row-major).
+// Paralelizacija: redovi su medjusobno nezavisni, kolone su medjusobno nezavisne.
+// Izmedju ta dva prolaza mora postojati barijera (implicitna na kraju "omp for").
+inline void fft2d(std::vector<cd>& a, size_t nn, bool inverse) {
+    const int n = int(nn);                  // OpenMP 2.0 (MSVC) trazi oznacen int kao brojac
+#pragma omp parallel if(gUseOmp)
+    {
+        std::vector<cd> line(nn);           // svaka nit ima SVOJ privremeni niz
 
-    // 1) 1D FFT nad svakim redom
-    for (size_t r = 0; r < n; ++r) {
-        for (size_t c = 0; c < n; ++c) line[c] = a[r * n + c];
-        fft(line, inverse);
-        for (size_t c = 0; c < n; ++c) a[r * n + c] = line[c];
-    }
+#pragma omp for
+        for (int r = 0; r < n; ++r) {
+            for (int c = 0; c < n; ++c) line[c] = a[size_t(r) * nn + size_t(c)];
+            fft(line, inverse);
+            for (int c = 0; c < n; ++c) a[size_t(r) * nn + size_t(c)] = line[c];
+        }
+        // <- barijera: kolone smiju poceti tek kad su svi redovi gotovi
 
-    // 2) 1D FFT nad svakom kolonom
-    for (size_t c = 0; c < n; ++c) {
-        for (size_t r = 0; r < n; ++r) line[r] = a[r * n + c];
-        fft(line, inverse);
-        for (size_t r = 0; r < n; ++r) a[r * n + c] = line[r];
+#pragma omp for
+        for (int c = 0; c < n; ++c) {
+            for (int r = 0; r < n; ++r) line[r] = a[size_t(r) * nn + size_t(c)];
+            fft(line, inverse);
+            for (int r = 0; r < n; ++r) a[size_t(r) * nn + size_t(c)] = line[r];
+        }
     }
 }
 

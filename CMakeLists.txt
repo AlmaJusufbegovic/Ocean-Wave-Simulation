@@ -16,4 +16,7 @@ add_executable(test_ocean src/test_ocean.cpp)
 add_executable(test_fields src/test_fields.cpp)
 
 add_executable(ocean_viewer src/viewer.cpp)
-target_link_libraries(ocean_viewer PRIVATE glfw GLEW::GLEW glm::glm)
+target_link_libraries(ocean_viewer PRIVATE glfw GLEW::GLEW glm::glm OpenMP::OpenMP_CXX)
+
+add_executable(bench src/bench.cpp)
+target_link_libraries(bench PRIVATE OpenMP::OpenMP_CXX)
