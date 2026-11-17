@@ -368,6 +368,11 @@ int main() {
     glfwSetKeyCallback(win, onKey);
     gUseOmp = true;
 
+    omp_set_num_threads(2);
+    // Predracunaj twiddle faktore za obje kaskade (izbjegava std::polar u petlji)
+    precomputeAllTwiddles(GRID);        // 256: kaskada 0
+    precomputeAllTwiddles(DETAIL_N);    // 128: kaskada 1
+
     const std::string skyFn = SKY_FN;
     GLuint skyProg = makeProgram(SKY_VS, "#version 430 core\n" + skyFn + SKY_FS_MAIN);
     GLuint oceanProg = makeProgram(OCEAN_VS, "#version 430 core\n" + skyFn + OCEAN_FS_MAIN);

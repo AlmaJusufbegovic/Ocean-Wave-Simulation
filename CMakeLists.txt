@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.21)
 project(ocean CXX)
 set(CMAKE_CXX_STANDARD 17)
 
+add_compile_options(/Zi)
+add_link_options(/DEBUG)
+
 find_package(OpenMP REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(GLEW REQUIRED)

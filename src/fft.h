@@ -4,6 +4,7 @@
 #include <cmath>
 #include <utility>
 #include <algorithm>
+#include <unordered_map>
 
 using cd = std::complex<float>;
 constexpr float PI = 3.14159265358979f;
@@ -12,6 +13,59 @@ constexpr float PI = 3.14159265358979f;
 // (omogucava poredjenje obje verzije u ISTOM programu)
 inline bool gUseOmp = false;
 
+// Predracunati twiddle faktori za svaki butterfly prolaz velicine 'len'.
+// twiddleFwd[len][k] = e^{-2*pi*i*k/len}   (forward FFT smjer)
+// Generise se jednom pri prvom pozivu za tu velicinu.
+#include <unordered_map>
+inline std::unordered_map<size_t, std::vector<cd>> twiddleFwd;
+
+inline void ensureTwiddles(size_t len) {
+    if (twiddleFwd.count(len)) return;
+    std::vector<cd> tw(len / 2);
+    for (size_t k = 0; k < len / 2; ++k)
+        tw[k] = std::polar(1.0f, -2.0f * PI * float(k) / float(len));
+    twiddleFwd[len] = std::move(tw);
+}
+
+// Pozovi jednom na pocetku programa za svaku velicinu FFT-a koju koristis.
+// Ovo predracuna sve twiddle faktore za butterfly prolaze 2, 4, 8, ..., N.
+inline void precomputeAllTwiddles(size_t N) {
+    for (size_t len = 2; len <= N; len <<= 1)
+        ensureTwiddles(len);
+}
+
+// In-place radix-2 FFT jedne linije. a.size() mora biti stepen dvojke.
+// inverse = true: inverzna transformacija, sa dijeljenjem sa N.
+// OPTIMIZOVANO: koristi predracunate twiddle faktore umjesto std::polar u petlji.
+inline void fft(std::vector<cd>& a, bool inverse) {
+    const size_t n = a.size();
+
+    // 1) bit-reversal permutacija  (nepromijenjena)
+    for (size_t i = 1, j = 0; i < n; ++i) {
+        size_t bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) std::swap(a[i], a[j]);
+    }
+
+    // 2) butterfly prolazi  (twiddle iz tabele umjesto std::polar)
+    for (size_t len = 2; len <= n; len <<= 1) {
+        const std::vector<cd>& tw = twiddleFwd[len];
+        for (size_t i = 0; i < n; i += len) {
+            for (size_t k = 0; k < len / 2; ++k) {
+                cd w = inverse ? std::conj(tw[k]) : tw[k];
+                cd u = a[i + k];
+                cd v = a[i + k + len / 2] * w;
+                a[i + k] = u + v;
+                a[i + k + len / 2] = u - v;
+            }
+        }
+    }
+
+    if (inverse)
+        for (auto& x : a) x /= float(n);
+}
+/*
 // In-place radix-2 FFT jedne linije. a.size() mora biti stepen dvojke.
 // inverse = true: inverzna transformacija, sa dijeljenjem sa N.
 inline void fft(std::vector<cd>& a, bool inverse) {
@@ -41,7 +95,7 @@ inline void fft(std::vector<cd>& a, bool inverse) {
 
     if (inverse)
         for (auto& x : a) x /= float(n);
-}
+}*/
 
 // Spori referentni DFT (N^2), u double preciznosti, samo za testiranje.
 inline std::vector<cd> dft_naive(const std::vector<cd>& x) {

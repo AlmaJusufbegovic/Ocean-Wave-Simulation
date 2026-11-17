@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 .vs/
 build/
+vcpkg/
 out/
 *.obj
 *.exe

@@ -7,7 +7,7 @@
     "architecture": { "value": "x64", "strategy": "external" },
     "toolset": { "value": "host=x64", "strategy": "external" },
     "environment": {
-      "VCPKG_ROOT": "C:/Users/almaj/source/repos/vcpkg"
+      "VCPKG_ROOT": "C:/vcpkg"
     },
     "cacheVariables": {
       "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
