@@ -17,6 +17,7 @@
 //   B                        : rasipanje svjetlosti u talasima (SSS) on/off
 //   T                        : providnost (plitka voda sa dnom) on/off
 //   S                        : kapljice (prskanje) on/off
+//   X                        : brza FFT (tablice, blokovi kolona) on/off - za poredjenje
 //   O                        : OpenMP on/off           F : wireframe        P : pauza     ESC : izlaz
 
 #include <GL/glew.h>
@@ -320,6 +321,7 @@ static void onKey(GLFWwindow* w, int key, int, int action, int) {
     if (key == GLFW_KEY_B) gSSSOn = !gSSSOn;
     if (key == GLFW_KEY_T) gShallowOn = !gShallowOn;
     if (key == GLFW_KEY_S) gSprayOn = !gSprayOn;
+    if (key == GLFW_KEY_X) gFastFft = !gFastFft;
 }
 
 // Parametri obje kaskade za zadanu brzinu vjetra. Visina valova se kalibrise tako da
@@ -367,6 +369,7 @@ int main() {
     glfwSetScrollCallback(win, onScroll);
     glfwSetKeyCallback(win, onKey);
     gUseOmp = true;
+    gFastFft = true;   // brza FFT (tablice, blokovi kolona); tipka X vraca staru za poredjenje
 
     const std::string skyFn = SKY_FN;
     GLuint skyProg = makeProgram(SKY_VS, "#version 430 core\n" + skyFn + SKY_FS_MAIN);
@@ -639,14 +642,14 @@ int main() {
         ++frames;
         titleTimer += dt;
         if (titleTimer >= 0.5) {
-            char title[320];
+            char title[360];
             std::snprintf(title, sizeof(title),
-                "Ocean | %zu+%zu | %.0f FPS | CPU %.1f ms | OpenMP %s (%d) | vjetar %.0f m/s | lambda %.1f | pjena %s (prag %.2f) | detalji %s | SSS %s | providnost %s | kapljice %s",
+                "Ocean | %zu+%zu | %.0f FPS | CPU %.1f ms | OpenMP %s (%d) | vjetar %.0f m/s | lambda %.1f | pjena %s (prag %.2f) | detalji %s | SSS %s | providnost %s | kapljice %s | brza FFT %s",
                 N, DETAIL_N, double(frames) / titleTimer, computeAccum / frames,
                 gUseOmp ? "ON" : "OFF", gUseOmp ? omp_get_max_threads() : 1,
                 double(gWind), double(gLambda), gFoamOn ? "ON" : "OFF", double(gFoamBias),
                 gDetailOn ? "ON" : "OFF", gSSSOn ? "ON" : "OFF", gShallowOn ? "ON" : "OFF",
-                gSprayOn ? "ON" : "OFF");
+                gSprayOn ? "ON" : "OFF", gFastFft ? "ON" : "OFF");
             glfwSetWindowTitle(win, title);
             titleTimer = 0.0;
             computeAccum = 0.0;

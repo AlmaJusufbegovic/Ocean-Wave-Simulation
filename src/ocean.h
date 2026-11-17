@@ -87,11 +87,11 @@ inline std::vector<float> computeHeights(const std::vector<cd>& h0, const OceanP
     float t, float* imagRatio = nullptr) {
     const size_t N = p.N;
     std::vector<cd> h = spectrumAtTime(h0, p, t);
-    fft2d(h, N, true);
+    ifft2dRaw(h, N);
     std::vector<float> out(N * N);
     float maxRe = 0, maxIm = 0;
     for (size_t i = 0; i < N* N; ++i) {
-        const cd v = h[i] * float(N * N);
+        const cd v = h[i] * ifft2dScale(N);
         out[i] = v.real();
         maxRe = std::max(maxRe, std::abs(v.real()));
         maxIm = std::max(maxIm, std::abs(v.imag()));
@@ -156,18 +156,18 @@ inline OceanFields computeFields(const std::vector<cd>& h0, const OceanParams& p
     const auto t2 = clk::now();
 
     // 3) pet inverznih 2D FFT-ova (svaki je interno paralelan)
-    fft2d(hh, N, true);
-    fft2d(sx, N, true);
-    fft2d(sz, N, true);
-    fft2d(dx, N, true);
-    fft2d(dz, N, true);
+    ifft2dRaw(hh, N);
+    ifft2dRaw(sx, N);
+    ifft2dRaw(sz, N);
+    ifft2dRaw(dx, N);
+    ifft2dRaw(dz, N);
     const auto t3 = clk::now();
 
     // 4) realni dio, pomnozen sa N^2
     auto toReal = [&](const std::vector<cd>& a) {
         std::vector<float> o(N * N);
         const int total = int(N * N);
-        const float s = float(N * N);
+        const float s = ifft2dScale(N);
 #pragma omp parallel for if(gUseOmp)
         for (int i = 0; i < total; ++i) o[size_t(i)] = a[size_t(i)].real() * s;
         return o;
@@ -254,14 +254,14 @@ inline OceanFields computeFieldsPacked(const std::vector<cd>& h0, const OceanPar
         }
     const auto t2 = clk::now();
 
-    fft2d(hh, N, true);
-    fft2d(sp, N, true);
-    fft2d(dp, N, true);
+    ifft2dRaw(hh, N);
+    ifft2dRaw(sp, N);
+    ifft2dRaw(dp, N);
     const auto t3 = clk::now();
 
     OceanFields f;
     const int total = int(N * N);
-    const float s = float(N * N);
+    const float s = ifft2dScale(N);
     f.height.resize(N * N); f.slopeX.resize(N * N); f.slopeZ.resize(N * N);
     f.dispX.resize(N * N);  f.dispZ.resize(N * N);
 #pragma omp parallel for if(gUseOmp)
@@ -300,9 +300,9 @@ inline std::vector<float> computeSlopesRG(const std::vector<cd>& h0, const Ocean
             const float kzd = (size_t(r) == N / 2) ? 0.0f : dk * float(freqIndex(size_t(r), N));
             sp[i] = (I * kxd - kzd) * hk[i];
         }
-    fft2d(sp, N, true);
+    ifft2dRaw(sp, N);
     std::vector<float> rg(N * N * 2);
-    const float s = float(N * N);
+    const float s = ifft2dScale(N);
     for (size_t i = 0; i < N * N; ++i) {
         rg[2 * i] = sp[i].real() * s;
         rg[2 * i + 1] = sp[i].imag() * s;

@@ -1,9 +1,12 @@
-// Profilisanje i poredjenje: sekvencijalno vs OpenMP (1, 2, 4, 8 niti), za tri varijante:
-//   "5 IFFT" : osnovna varijanta (computeFields)  - 5 inverznih 2D FFT-ova po frejmu
-//   "3 IFFT" : pakovana varijanta (computeFieldsPacked) - dva realna polja u jednom IFFT-u
-//   "frame"  : pun frame kao u viewer-u: pakovana kaskada 0 + pjena (Jacobijan) + kaskada 1 (nagibi)
+// Profilisanje i poredjenje: sekvencijalno vs OpenMP (1, 2, 4, 8 niti), za pet varijanti:
+//   "5 IFFT"  : osnovna varijanta (computeFields), stara FFT
+//   "3 IFFT"  : pakovana varijanta (computeFieldsPacked), stara FFT
+//   "3 IFFT+" : pakovana varijanta, NOVA (brza) FFT: tablice twiddle faktora i bit-reversala,
+//               redovi na mjestu, kolone u blokovima, bez dijeljenja sa N
+//   "frame"   : pun frame kao u viewer-u (pakovana kaskada 0 + pjena + kaskada 1), stara FFT
+//   "frame+"  : isto, NOVA (brza) FFT
 // Mjeri se samo racunanje (bez OpenGL-a, bez pripreme tjemena).
-// Pokretanje:  bench.exe          (puno mjerenje, oko 3 minute)
+// Pokretanje:  bench.exe          (puno mjerenje, nekoliko minuta)
 //              bench.exe quick    (brzi probni prolaz, N = 128 i 256)
 #include "ocean.h"
 #include <omp.h>
@@ -21,8 +24,9 @@ static double median(std::vector<double> v) {
 }
 
 struct Cfg { const char* name; bool omp; int threads; };
-enum Variant { V_BASE = 0, V_PACKED = 1, V_FULL = 2 };
-static const char* VLABEL[] = { "5 IFFT", "3 IFFT", "frame" };
+enum Variant { V_BASE = 0, V_PACKED = 1, V_PACKED_FAST = 2, V_FULL = 3, V_FULL_FAST = 4 };
+static const char* VLABEL[] = { "5 IFFT", "3 IFFT", "3 IFFT+", "frame", "frame+" };
+static const int NVAR = 5;
 
 struct Times {
     double spectrum = 0, prep = 0, ifft = 0, extract = 0, foam = 0, detail = 0;
@@ -33,7 +37,7 @@ struct Times {
 struct Setup {
     OceanParams p;                  // cijeli spektar (varijante 5 IFFT i 3 IFFT)
     std::vector<cd> h0;
-    OceanParams p0, p1;             // kaskade (varijanta frame)
+    OceanParams p0, p1;             // kaskade (varijante frame)
     std::vector<cd> h0a, h0b;
     std::vector<float> foam;
     explicit Setup(size_t N) {
@@ -55,6 +59,7 @@ static Times runOnce(Variant v, Setup& s, float t) {
     auto ms = [](clk::time_point a, clk::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
         };
+    gFastFft = (v == V_PACKED_FAST || v == V_FULL_FAST);
     Times tm;
     FrameTimes ft;
     if (v == V_BASE) {
@@ -62,11 +67,12 @@ static Times runOnce(Variant v, Setup& s, float t) {
         g_sink = g_sink + double(f.height[0]);
     }
     else {
-        const OceanParams& p = (v == V_PACKED) ? s.p : s.p0;
-        const std::vector<cd>& h0 = (v == V_PACKED) ? s.h0 : s.h0a;
+        const bool full = (v == V_FULL || v == V_FULL_FAST);
+        const OceanParams& p = full ? s.p0 : s.p;
+        const std::vector<cd>& h0 = full ? s.h0a : s.h0;
         const OceanFields f = computeFieldsPacked(h0, p, t, &ft);
         g_sink = g_sink + double(f.height[0]);
-        if (v == V_FULL) {
+        if (full) {
             const auto a = clk::now();
             updateFoam(f, s.p0, 1.6f, 0.016f, 0.78f, 4.0f, 1.5f, s.foam);
             const auto b = clk::now();
@@ -103,25 +109,37 @@ int main(int argc, char** argv) {
         { "omp", true, 4 },
         { "omp", true, 8 },
     };
+    const int NCFG = 5;
 
     // ---- 1) provjere ispravnosti ----
     {
         std::printf("PROVJERE ISPRAVNOSTI (N=256)\n");
         Setup s(256);
         gUseOmp = false;
+        gFastFft = false;
         const OceanFields a = computeFields(s.h0, s.p, 3.0f);
         const OceanFields b = computeFieldsPacked(s.h0, s.p, 3.0f);
         std::printf("  3 IFFT naspram 5 IFFT (najveca relativna razlika): h=%.1e  nagibX=%.1e  nagibZ=%.1e  Dx=%.1e  Dz=%.1e\n",
             maxRelDiff(a.height, b.height), maxRelDiff(a.slopeX, b.slopeX), maxRelDiff(a.slopeZ, b.slopeZ),
             maxRelDiff(a.dispX, b.dispX), maxRelDiff(a.dispZ, b.dispZ));
 
+        gFastFft = true;
+        const OceanFields c = computeFieldsPacked(s.h0, s.p, 3.0f);
+        std::printf("  nova FFT naspram stare FFT (3 IFFT):  h=%.1e  nagibX=%.1e  nagibZ=%.1e  Dx=%.1e  Dz=%.1e\n",
+            maxRelDiff(b.height, c.height), maxRelDiff(b.slopeX, c.slopeX), maxRelDiff(b.slopeZ, c.slopeZ),
+            maxRelDiff(b.dispX, c.dispX), maxRelDiff(b.dispZ, c.dispZ));
+
         gUseOmp = true;
         omp_set_num_threads(8);
+        gFastFft = false;
         const OceanFields a2 = computeFields(s.h0, s.p, 3.0f);
         const OceanFields b2 = computeFieldsPacked(s.h0, s.p, 3.0f);
-        std::printf("  OpenMP naspram sekvencijalno, 5 IFFT: %g   3 IFFT: %g\n",
+        gFastFft = true;
+        const OceanFields c2 = computeFieldsPacked(s.h0, s.p, 3.0f);
+        std::printf("  OpenMP naspram sekvencijalno: 5 IFFT: %g   3 IFFT: %g   3 IFFT+ (nova FFT): %g\n",
             std::max(maxRelDiff(a.height, a2.height), maxRelDiff(a.dispX, a2.dispX)),
-            std::max(maxRelDiff(b.height, b2.height), maxRelDiff(b.dispX, b2.dispX)));
+            std::max(maxRelDiff(b.height, b2.height), maxRelDiff(b.dispX, b2.dispX)),
+            std::max(maxRelDiff(c.height, c2.height), maxRelDiff(c.dispX, c2.dispX)));
 
         // pjena i kaskada 1: sekvencijalno naspram OpenMP
         std::vector<float> foamSeq(256 * 256, 0.0f), foamOmp(256 * 256, 0.0f);
@@ -135,18 +153,19 @@ int main(int argc, char** argv) {
         const std::vector<float> dOmp = computeSlopesRG(s.h0b, s.p1, 3.0f);
         std::printf("  OpenMP naspram sekvencijalno, pjena: %g   kaskada 1 (nagibi): %g\n\n",
             maxRelDiff(foamSeq, foamOmp), maxRelDiff(dSeq, dOmp));
+        gFastFft = false;
     }
 
     // ---- 2) mjerenja ----
     FILE* csv = std::fopen("bench_results.csv", "w");
     if (csv)
-        std::fprintf(csv, "N;varijanta;nacin;niti;spektar_ms;priprema_ms;ifft_ms;izvlacenje_ms;pjena_ms;detalji_ms;ukupno_ms;ubrzanje;efikasnost;ubrzanje_naspram_osnovne_seq\n");
+        std::fprintf(csv, "N;varijanta;nacin;niti;spektar_ms;priprema_ms;ifft_ms;izvlacenje_ms;pjena_ms;detalji_ms;ukupno_ms;ubrzanje;efikasnost;ubrzanje_naspram_osnovne_seq;nova_naspram_stare_FFT\n");
 
     std::printf("MJERENJE: %d zagrijavanja, %d ponavljanja, medijan, sve u ms%s\n", warmup, repsFinal, quick ? "  [quick]" : "");
-    std::printf("Varijante: '5 IFFT' = osnovna, '3 IFFT' = pakovana, 'frame' = pakovana + pjena + kaskada 1\n");
-    std::printf("'ubrz.' = naspram iste varijante sekvencijalno, 'vs osn.' = naspram osnovne (5 IFFT) sekvencijalne\n");
-    std::printf("%-4s %-6s %-4s %2s | %6s %6s %7s %6s %6s %6s | %8s | %6s %5s | %7s\n",
-        "N", "var.", "nac.", "ni", "spekt", "prip.", "ifft", "izvl.", "pjena", "detalj", "ukupno", "ubrz.", "efik.", "vs osn.");
+    std::printf("Varijante: '5 IFFT' osnovna, '3 IFFT' pakovana, 'frame' pakovana + pjena + kaskada 1; znak '+' = nova (brza) FFT\n");
+    std::printf("'ubrz.' = naspram iste varijante sekvencijalno, 'vs osn.' = naspram osnovne sekvencijalne, 'n/s' = nova FFT naspram stare (isti nacin)\n");
+    std::printf("%-4s %-7s %-4s %2s | %6s %6s %7s %6s %6s %6s | %8s | %6s %5s | %7s %6s\n",
+        "N", "var.", "nac.", "ni", "spekt", "prip.", "ifft", "izvl.", "pjena", "detalj", "ukupno", "ubrz.", "efik.", "vs osn.", "n/s");
 
     // prolaz 0 samo "zagrijava" procesor (frekvencija, kesevi) i ne ispisuje se
     for (int pass = 0; pass < 2; ++pass) {
@@ -155,10 +174,12 @@ int main(int argc, char** argv) {
         for (size_t N : sizes) {
             Setup s(N);
             double baseSeqTotal = 0;
-            for (int vi = 0; vi < 3; ++vi) {
+            double totals[NVAR][NCFG] = {};
+            for (int vi = 0; vi < NVAR; ++vi) {
                 const Variant v = Variant(vi);
                 double seqTotal = 0;
-                for (const Cfg& cfg : cfgs) {
+                for (int ci = 0; ci < NCFG; ++ci) {
+                    const Cfg& cfg = cfgs[ci];
                     gUseOmp = cfg.omp;
                     omp_set_num_threads(cfg.threads);
                     for (int i = 0; i < warmup; ++i) runOnce(v, s, 1.0f);
@@ -171,6 +192,7 @@ int main(int argc, char** argv) {
                         vt.push_back(tm.total());
                     }
                     const double total = median(vt);
+                    totals[vi][ci] = total;
                     if (!cfg.omp) {
                         seqTotal = total;
                         if (v == V_BASE) baseSeqTotal = total;
@@ -180,8 +202,10 @@ int main(int argc, char** argv) {
                     const double vsBase = baseSeqTotal / total;
                     if (!show) continue;
 
-                    const bool full = (v == V_FULL);
-                    char foamS[16], detS[16];
+                    const bool full = (v == V_FULL || v == V_FULL_FAST);
+                    const bool fast = (v == V_PACKED_FAST || v == V_FULL_FAST);
+                    const double newOverOld = fast ? totals[vi - 1][ci] / total : 0.0;
+                    char foamS[16], detS[16], nsS[16];
                     if (full) {
                         std::snprintf(foamS, sizeof(foamS), "%6.2f", median(vfo));
                         std::snprintf(detS, sizeof(detS), "%6.2f", median(vd));
@@ -190,18 +214,22 @@ int main(int argc, char** argv) {
                         std::snprintf(foamS, sizeof(foamS), "%6s", "-");
                         std::snprintf(detS, sizeof(detS), "%6s", "-");
                     }
-                    std::printf("%-4zu %-6s %-4s %2d | %6.2f %6.2f %7.2f %6.2f %s %s | %8.2f | %5.2fx %4.0f%% | %6.2fx\n",
+                    if (fast) std::snprintf(nsS, sizeof(nsS), "%5.2fx", newOverOld);
+                    else std::snprintf(nsS, sizeof(nsS), "%6s", "-");
+                    std::printf("%-4zu %-7s %-4s %2d | %6.2f %6.2f %7.2f %6.2f %s %s | %8.2f | %5.2fx %4.0f%% | %6.2fx %s\n",
                         N, VLABEL[vi], cfg.name, cfg.threads, median(vs), median(vp), median(vf), median(ve),
-                        foamS, detS, total, speedup, eff * 100.0, vsBase);
+                        foamS, detS, total, speedup, eff * 100.0, vsBase, nsS);
                     if (csv)
-                        std::fprintf(csv, "%zu;%s;%s;%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n", N, VLABEL[vi],
+                        std::fprintf(csv, "%zu;%s;%s;%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n", N, VLABEL[vi],
                             cfg.name, cfg.threads, median(vs), median(vp), median(vf), median(ve),
-                            full ? median(vfo) : 0.0, full ? median(vd) : 0.0, total, speedup, eff, vsBase);
+                            full ? median(vfo) : 0.0, full ? median(vd) : 0.0, total, speedup, eff, vsBase,
+                            fast ? newOverOld : 0.0);
                 }
                 if (show) std::printf("\n");
             }
         }
     }
+    gFastFft = false;
     if (csv) std::fclose(csv);
     std::printf("Rezultati su snimljeni u bench_results.csv (checksum %g)\n", double(g_sink));
     return 0;

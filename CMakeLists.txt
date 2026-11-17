@@ -20,3 +20,6 @@ target_link_libraries(ocean_viewer PRIVATE glfw GLEW::GLEW glm::glm OpenMP::Open
 
 add_executable(bench src/bench.cpp)
 target_link_libraries(bench PRIVATE OpenMP::OpenMP_CXX)
+
+add_executable(test_fft_fast src/test_fft_fast.cpp)
+target_link_libraries(test_fft_fast PRIVATE OpenMP::OpenMP_CXX)
